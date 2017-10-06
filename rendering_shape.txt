@@ -1,0 +1,178 @@
+static void render_triangle(renderer_t *  renderer, const shape_t *  shape){
+	//VARS
+	const camera_t *  cam = &renderer->camera;
+	const mat4_t *  ct = &cam->transformation;
+	const vertex_t **  vertices = (const vertex_t **)shape->vertices;
+	const vertex_t *  v1 = (const vertex_t *)vertices[0]; 
+	const vertex_t *  v2 = (const vertex_t *)vertices[1];
+	const vertex_t *  v3 = (const vertex_t *)vertices[2];
+	const vec3_t *  v1v = &v1->vec,* v2v = &v2->vec,* v3v = &v3->vec;
+	const cRGB_t *  v1c = &v1->color, * v2c = &v2->color, * v3c = &v3->color;
+	const vec2_t *  v1t = &v1->texCoord, * v2t = &v2->texCoord, * v3t = &v3->texCoord;
+	const vec2_t *  samples = renderer->samples;
+	const vec2_t *  cursample;
+	const int texId = shape->texId;
+	const int bufWidth = renderer->bufWidth;
+	const unsigned int imgW = renderer->imgWidth, imgH = renderer->imgHeight, used_samples = renderer->used_samples;
+	const float imgW_h = renderer->imgWidth_half, imgH_h = renderer->imgHeight_half, sample_factor = renderer->sample_factor;
+	vec3_t pNDC1 = {ct->_14, ct->_24, ct->_34}, 
+		   pNDC2 = {ct->_14, ct->_24, ct->_34}, 
+		   pNDC3 = {ct->_14, ct->_24, ct->_34}, pRaster1, pRaster2, pRaster3, pixelSample;
+	cRGB_t *  frameBuffer = renderer->frameBuffer;
+	barycentric_t bc;
+	unsigned int curW, curH;
+	float maxx, maxy, minx, miny, z, 
+		  weight1 = ct->_44, 
+		  weight2 = ct->_44, 
+		  weight3 = ct->_44, z0, z1, z2, z3, rz1, rz2, rz3;
+	float over_z = RENDER_FLT_MAX;
+	float *  old_z;
+	float *  zBuffer = renderer->zBuffer;
+	//bool completeout = true;
+	cRGB_t curCol1, *fbc, *txc;
+	//EO VARS
+	
+	//WORLD TO RASTER
+	
+	//weight1 = transform_point_dest(&pNDC1, transformation, v1v);
+	pNDC1.x += (v1v->x * ct->_11) + (v1v->y * ct->_12) + (v1v->z * ct->_13);// + ct->_14;
+	pNDC1.y += (v1v->x * ct->_21) + (v1v->y * ct->_22) + (v1v->z * ct->_23);// + ct->_24;
+	pNDC1.z += (v1v->x * ct->_31) + (v1v->y * ct->_32) + (v1v->z * ct->_33);// + ct->_34;
+	weight1 += (v1v->x * ct->_41) + (v1v->y * ct->_42) + (v1v->z * ct->_43);// + ct->_44;
+	if (weight1 < 0.f) return;
+	if (weight1 != 1.f && weight1 != 0.f){
+		weight1 = 1.f/weight1; pNDC1.x *= weight1; pNDC1.y *= weight1; pNDC1.z *= weight1;
+	}
+	pRaster1.x = (pNDC1.x + 1.f) * imgW_h;
+	pRaster1.y = (1.f-pNDC1.y) * imgH_h;
+	pRaster1.z = -pNDC1.z;
+	rz1 = 1.f/pRaster1.z;
+	//completeout &= ((pNDC1.x < cam->l) || (pNDC1.x > cam->r)) && ( (pNDC1.y < cam->b) || (pNDC1.y > cam->t));
+
+	//weight2 = transform_point_dest(&pNDC2, transformation, v2v);
+	pNDC2.x += (v2v->x * ct->_11) + (v2v->y * ct->_12) + (v2v->z * ct->_13);// + ct->_14;
+	pNDC2.y += (v2v->x * ct->_21) + (v2v->y * ct->_22) + (v2v->z * ct->_23);// + ct->_24;
+	pNDC2.z += (v2v->x * ct->_31) + (v2v->y * ct->_32) + (v2v->z * ct->_33);// + ct->_34;
+	weight2 += (v2v->x * ct->_41) + (v2v->y * ct->_42) + (v2v->z * ct->_43);// + ct->_44;
+	if (weight2 < 0.f) return;
+	if (weight2 != 1.f && weight2 != 0.f){
+		weight2 = 1.f/weight2; pNDC2.x *= weight2; pNDC2.y *= weight2; pNDC2.z *= weight2;
+	}	
+	pRaster2.x = (pNDC2.x + 1.f) * imgW_h;
+	pRaster2.y = (1.f-pNDC2.y) * imgH_h;
+	pRaster2.z = -pNDC2.z;
+	rz2 = 1.f/pRaster2.z;
+	//completeout &= ((pNDC2.x < cam->l) || (pNDC2.x > cam->r)) && ( (pNDC2.y < cam->b) || (pNDC2.y > cam->t));
+
+	//weight3 = transform_point_dest(&pNDC3, transformation, v3v);
+	pNDC3.x += (v3v->x * ct->_11) + (v3v->y * ct->_12) + (v3v->z * ct->_13);// + ct->_14;
+	pNDC3.y += (v3v->x * ct->_21) + (v3v->y * ct->_22) + (v3v->z * ct->_23);// + ct->_24;
+	pNDC3.z += (v3v->x * ct->_31) + (v3v->y * ct->_32) + (v3v->z * ct->_33);// + ct->_34;
+	weight3 += (v3v->x * ct->_41) + (v3v->y * ct->_42) + (v3v->z * ct->_43);// + ct->_44;
+	if (weight3 < 0.f) return;
+	if (weight3 != 1.f && weight3 != 0.f){
+		weight3 = 1.f/weight3; pNDC3.x *= weight3; pNDC3.y *= weight3; pNDC3.z *= weight3;
+	}	
+	if (weight3 < 0.f) return;	
+	pRaster3.x = (pNDC3.x + 1.f) * imgW_h;
+	pRaster3.y = (1.f-pNDC3.y) * imgH_h;
+	pRaster3.z = -pNDC3.z;
+	rz3 = 1.f/pRaster3.z;
+	//completeout &= ((pNDC3.x < cam->l) || (pNDC3.x > cam->r)) && ( (pNDC3.y < cam->b) || (pNDC3.y > cam->t));
+	
+	//this is only a test. here we should implement complete fine frustum culling
+	if ((((pNDC1.x < cam->l) || (pNDC1.x > cam->r)) && ( (pNDC1.y < cam->b) || (pNDC1.y > cam->t))) && 
+		(((pNDC2.x < cam->l) || (pNDC2.x > cam->r)) && ( (pNDC2.y < cam->b) || (pNDC2.y > cam->t))) && 
+		(((pNDC3.x < cam->l) || (pNDC3.x > cam->r)) && ( (pNDC3.y < cam->b) || (pNDC3.y > cam->t)))) return;
+	
+	//1.f / area in reason of multiplication
+	//bc.area = 1.f/place_of_vec3(&pRaster1, &pRaster2, &pRaster3); 
+	bc.area = 1.f/((pRaster3.x - pRaster1.x) * (pRaster2.y - pRaster1.y) - (pRaster3.y - pRaster1.y) * (pRaster2.x - pRaster1.x));
+	//EO WORLD TO RASTER
+	//BOUNDING BOX
+	maxx = fminf((float)imgW, fmaxf(pRaster1.x, fmaxf(pRaster2.x, pRaster3.x)));
+	maxy = fminf((float)imgH, fmaxf(pRaster1.y, fmaxf(pRaster2.y, pRaster3.y)));
+	minx = fmaxf(0.f, fminf(pRaster1.x, fminf(pRaster2.x, pRaster3.x)));
+	miny = fmaxf(0.f, fminf(pRaster1.y, fminf(pRaster2.y, pRaster3.y)));
+	curH = miny;
+	curW = minx;
+	
+	//EO BOUNDING BOX
+	for(; curH < maxy; ++curH) {
+		unsigned int curHbufWidth = curH * bufWidth;
+		for(curW = minx; curW < maxx; ++curW) {
+			cursample = samples;
+			unsigned int curWused_samples = curHbufWidth + (curW * used_samples); 
+			for (unsigned int sample = used_samples; sample--;) {
+				//cursample = &samples[sample];
+				pixelSample.x = curW;
+				pixelSample.x += cursample->x;
+				pixelSample.y = curH;
+				pixelSample.y += cursample->y;
+				++cursample;
+				//SINGLE PX
+				
+				if(	(((bc.w0_12 = (pixelSample.x - pRaster2.x) * (pRaster3.y - pRaster2.y) - (pixelSample.y - pRaster2.y) * (pRaster3.x - pRaster2.x))<0.f) ||
+					((bc.w1_20 = (pixelSample.x - pRaster3.x) * (pRaster1.y - pRaster3.y) - (pixelSample.y - pRaster3.y) * (pRaster1.x - pRaster3.x))<0.f) ||	
+					((bc.w2_01 = (pixelSample.x - pRaster1.x) * (pRaster2.y - pRaster1.y) - (pixelSample.y - pRaster1.y) * (pRaster2.x - pRaster1.x))<0.f))) 
+					{ continue; }
+				
+				bc.bc0 = bc.w0_12 * bc.area;
+				bc.bc1 = bc.w1_20 * bc.area;
+				bc.bc2 = bc.w2_01 * bc.area;
+				//over_z = pRaster1.z * bc.bc0 + pRaster2.z * bc.bc1 + pRaster3.z * bc.bc2;
+				//z = 1.f / over_z;
+				
+				z = (rz1 * bc.bc0);
+				z += (rz2 * bc.bc1);
+				z += (rz3 * bc.bc2); 
+				
+				//unsigned int bi = curH * bufWidth + (curW * used_samples) + sample;
+				unsigned int bi = curWused_samples + sample;
+				
+				old_z = zBuffer + bi;
+
+				if ( z > *old_z ) { continue; }
+				
+				*old_z = z;			
+				
+				//only for z buffer print 
+				//renderer->min_z = fminf(renderer->min_z, z);
+				//renderer->max_z = fmaxf(renderer->max_z, z);
+				
+				//COLOR AND TEX
+
+				z0 = bc.bc0*weight1;
+				z1 = bc.bc1*weight2;
+				z2 = bc.bc2*weight3;
+				z3 = 1.f/(z0 + z1 + z2);
+				
+				switch(texId) {
+					case -1: {
+						curCol1.r = (z0*v1c->r + z1*v2c->r + z2*v3c->r ) * z3;
+						curCol1.g = (z0*v1c->g + z1*v2c->g + z2*v3c->g ) * z3;
+						curCol1.b = (z0*v1c->b + z1*v2c->b + z2*v3c->b ) * z3;
+						}
+						break;
+					default: {
+						int texx = (int)(( z0*v1t->x + z1*v2t->x + z2*v3t->x ) * z3 * 512.f);
+						int texy = (int)(( z0*v1t->y + z1*v2t->y + z2*v3t->y ) * z3 * 512.f);
+						
+						txc = &renderer->texture[texy * imgW + texx];
+						curCol1.r = txc->r;
+						curCol1.g = txc->g;
+						curCol1.b = txc->b;
+						}						
+						break;
+				}
+				
+				//fbc = &frameBuffer[bi];
+				fbc = frameBuffer + bi;
+				fbc->r = curCol1.r * sample_factor;
+				fbc->g = curCol1.g * sample_factor;
+				fbc->b = curCol1.b * sample_factor;
+					//EO COLOR AND TEX
+			}
+		}
+	}
+}
