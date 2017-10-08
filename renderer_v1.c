@@ -1,0 +1,1 @@
+./configure --enable-widec --with-libtool --disable-home-terminfo --enable-database --disable-termcap --enable-sp-funcs --enable-term-driver --enable-interop
