@@ -1,0 +1,29 @@
+void 
+renderer_output_ppm(renderer_t * renderer, const char * filename){
+	unsigned int colcnt=0, bi=0, samplestart;
+	int i, j, imgW = renderer->imgWidth, imgH = renderer->imgHeight;
+    FILE *fp = fopen(filename, "wb"); /* b - binary mode */
+    (void) fprintf(fp, "P6\n%d %d\n255\n", imgW, imgH);
+	cRGB_t fc;
+	unsigned char color[3*imgW*imgH];
+    for (j = 0; j < imgH; ++j){
+	  bi = j * renderer->bufWidth;
+	  for (i = 0; i < imgW; ++i){
+		fc.r = 0.f, fc.g = 0.f, fc.b = 0.f;
+		samplestart = bi + (i*renderer->used_samples);
+		for (unsigned int sample = renderer->used_samples; sample--;){
+			cRGB_t * c = &renderer->frameBuffer[samplestart + sample];
+			//crgb_crgb_add(&fc, c);
+			fc.r += c->r;
+			fc.g += c->g;
+			fc.b += c->b;
+		}
+	 
+		color[colcnt++] = (unsigned char)(fc.r * 255.f);
+		color[colcnt++] = (unsigned char)(fc.g * 255.f);
+		color[colcnt++] = (unsigned char)(fc.b * 255.f);
+	  }
+    }
+	(void) fwrite(color, 1, 3*imgW*imgH, fp);
+    (void) fclose(fp);
+}
